@@ -1,0 +1,138 @@
+{
+  "name": "Python CI Template",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ci-python",
+        "responseMode": "lastNode"
+      },
+      "name": "GitHub Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "webhookId": "ci-python"
+    },
+    {
+      "parameters": {
+        "jsCode": "const event = $json;\nconst repo = event.repository?.full_name;\nconst commit = event.after || event.pull_request?.head?.sha;\nconst branch = (event.ref || '').replace('refs/heads/', '');\n\nreturn {\n  json: {\n    repo,\n    commit,\n    branch,\n    workdir: `/tmp/ci/${repo.replace(/\\//g, '-')}`,\n    python_version: '3.11'\n  }\n};"
+      },
+      "name": "Parse Event",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "command": "=mkdir -p {{$json.workdir}} && cd {{$json.workdir}} && (git clone https://{{$env.GITHUB_TOKEN}}@github.com/{{$json.repo}}.git . 2>/dev/null || git pull)",
+        "host": "={{ $credentials.ssh.host }}",
+        "user": "={{ $credentials.ssh.user }}",
+        "privateKey": "={{ $credentials.ssh.privateKey }}"
+      },
+      "name": "Checkout",
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "command": "=cd {{$json.workdir}} && python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt",
+        "host": "={{ $credentials.ssh.host }}",
+        "user": "={{ $credentials.ssh.user }}",
+        "privateKey": "={{ $credentials.ssh.privateKey }}"
+      },
+      "name": "Install Dependencies",
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [850, 300]
+    },
+    {
+      "parameters": {
+        "command": "=cd {{$json.workdir}} && source venv/bin/activate && flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics",
+        "host": "={{ $credentials.ssh.host }}",
+        "user": "={{ $credentials.ssh.user }}",
+        "privateKey": "={{ $credentials.ssh.privateKey }}"
+      },
+      "name": "Flake8 Lint",
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [1050, 200]
+    },
+    {
+      "parameters": {
+        "command": "=cd {{$json.workdir}} && source venv/bin/activate && pytest --cov=src --cov-report=xml",
+        "host": "={{ $credentials.ssh.host }}",
+        "user": "={{ $credentials.ssh.user }}",
+        "privateKey": "={{ $credentials.ssh.privateKey }}"
+      },
+      "name": "Pytest",
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [1050, 400]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.github.com/repos/{{$json.repo}}/statuses/{{$json.commit}}",
+        "method": "POST",
+        "body": {
+          "state": "success",
+          "description": "✅ Python CI passed",
+          "context": "n8n-ci/python"
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true
+      },
+      "name": "Report Success",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1250, 300]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.github.com/repos/{{$json.repo}}/statuses/{{$json.commit}}",
+        "method": "POST",
+        "body": {
+          "state": "failure",
+          "description": "=❌ Python CI failed",
+          "context": "n8n-ci/python"
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true
+      },
+      "name": "Report Failure",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1250, 500]
+    }
+  ],
+  "connections": {
+    "GitHub Webhook": {
+      "main": [[{"node": "Parse Event", "type": "main", "index": 0}]]
+    },
+    "Parse Event": {
+      "main": [[{"node": "Checkout", "type": "main", "index": 0}]]
+    },
+    "Checkout": {
+      "main": [[{"node": "Install Dependencies", "type": "main", "index": 0}]]
+    },
+    "Install Dependencies": {
+      "main": [
+        [{"node": "Flake8 Lint", "type": "main", "index": 0}],
+        [{"node": "Pytest", "type": "main", "index": 0}]
+      ]
+    },
+    "Flake8 Lint": {
+      "main": [[{"node": "Report Success", "type": "main", "index": 0}]]
+    },
+    "Pytest": {
+      "main": [[{"node": "Report Success", "type": "main", "index": 0}]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": ["ci", "python", "template"]
+}

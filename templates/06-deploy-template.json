@@ -1,0 +1,162 @@
+{
+  "name": "Deploy Template",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ci-deploy",
+        "responseMode": "lastNode"
+      },
+      "name": "GitHub Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "webhookId": "ci-deploy"
+    },
+    {
+      "parameters": {
+        "jsCode": "const event = $json;\nconst repo = event.repository?.full_name;\nconst commit = event.after || event.pull_request?.head?.sha;\nconst branch = (event.ref || '').replace('refs/heads/', '');\n\nreturn {\n  json: {\n    repo,\n    commit,\n    branch,\n    workdir: `/var/www/${repo.split('/')[1]}`,\n    onlyMain: branch === 'main'\n  }\n};"
+      },
+      "name": "Parse Event",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Only deploy from main branch\nif (!$json.onlyMain) {\n  return {\n    json: {\n      skipped: true,\n      reason: 'Not main branch'\n    }\n  };\n}\nreturn $input.all()[0];"
+      },
+      "name": "Check Branch",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "command": "=cd {{$json.workdir}} && git pull origin main",
+        "host": "={{ $credentials.deploy.host }}",
+        "user": "={{ $credentials.deploy.user }}",
+        "privateKey": "={{ $credentials.deploy.privateKey }}"
+      },
+      "name": "Pull Code",
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [850, 300]
+    },
+    {
+      "parameters": {
+        "command": "=cd {{$json.workdir}} && npm install --production",
+        "host": "={{ $credentials.deploy.host }}",
+        "user": "={{ $credentials.deploy.user }}",
+        "privateKey": "={{ $credentials.deploy.privateKey }}"
+      },
+      "name": "Install Prod",
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [1050, 300]
+    },
+    {
+      "parameters": {
+        "command": "=cd {{$json.workdir}} && pm2 restart app || pm2 start npm --name app -- start",
+        "host": "={{ $credentials.deploy.host }}",
+        "user": "={{ $credentials.deploy.user }}",
+        "privateKey": "={{ $credentials.deploy.privateKey }}"
+      },
+      "name": "Restart App",
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [1250, 300]
+    },
+    {
+      "parameters": {
+        "url": "=https://your-app.com/health",
+        "method": "GET",
+        "timeout": 30000
+      },
+      "name": "Health Check",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1450, 300]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.github.com/repos/{{$json.repo}}/statuses/{{$json.commit}}",
+        "method": "POST",
+        "body": {
+          "state": "success",
+          "description": "🚀 Deployed to production",
+          "context": "n8n-ci/deploy"
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true
+      },
+      "name": "Report Success",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1650, 200]
+    },
+    {
+      "parameters": {
+        "chatId": "5220247822",
+        "text": "=🚀 Deployment successful!\n\nRepo: {{$json.repo}}\nCommit: {{$json.commit}}\nURL: https://your-app.com",
+        "options": {}
+      },
+      "name": "Notify Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [1850, 200]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.github.com/repos/{{$json.repo}}/statuses/{{$json.commit}}",
+        "method": "POST",
+        "body": {
+          "state": "failure",
+          "description": "❌ Deployment failed",
+          "context": "n8n-ci/deploy"
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true
+      },
+      "name": "Report Failure",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1650, 400]
+    }
+  ],
+  "connections": {
+    "GitHub Webhook": {
+      "main": [[{"node": "Parse Event", "type": "main", "index": 0}]]
+    },
+    "Parse Event": {
+      "main": [[{"node": "Check Branch", "type": "main", "index": 0}]]
+    },
+    "Check Branch": {
+      "main": [[{"node": "Pull Code", "type": "main", "index": 0}]]
+    },
+    "Pull Code": {
+      "main": [[{"node": "Install Prod", "type": "main", "index": 0}]]
+    },
+    "Install Prod": {
+      "main": [[{"node": "Restart App", "type": "main", "index": 0}]]
+    },
+    "Restart App": {
+      "main": [[{"node": "Health Check", "type": "main", "index": 0}]]
+    },
+    "Health Check": {
+      "main": [
+        [{"node": "Report Success", "type": "main", "index": 0}]
+      ]
+    },
+    "Report Success": {
+      "main": [[{"node": "Notify Telegram", "type": "main", "index": 0}]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": ["ci", "deploy", "production", "template"]
+}

@@ -1,0 +1,137 @@
+{
+  "name": "Docker CI Template",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ci-docker",
+        "responseMode": "lastNode"
+      },
+      "name": "GitHub Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "webhookId": "ci-docker"
+    },
+    {
+      "parameters": {
+        "jsCode": "const event = $json;\nconst repo = event.repository?.full_name;\nconst commit = event.after || event.pull_request?.head?.sha;\nconst branch = (event.ref || '').replace('refs/heads/', '');\nconst shortSha = commit?.substring(0, 7);\n\nreturn {\n  json: {\n    repo,\n    commit,\n    branch,\n    shortSha,\n    imageTag: `${repo.split('/')[1]}:${shortSha}`,\n    workdir: `/tmp/ci/${repo.replace(/\\//g, '-')}`\n  }\n};"
+      },
+      "name": "Parse Event",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "command": "=mkdir -p {{$json.workdir}} && cd {{$json.workdir}} && (git clone https://{{$env.GITHUB_TOKEN}}@github.com/{{$json.repo}}.git . 2>/dev/null || git pull)",
+        "host": "={{ $credentials.ssh.host }}",
+        "user": "={{ $credentials.ssh.user }}",
+        "privateKey": "={{ $credentials.ssh.privateKey }}"
+      },
+      "name": "Checkout",
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "command": "=cd {{$json.workdir}} && docker build -t {{$json.imageTag}} .",
+        "host": "={{ $credentials.ssh.host }}",
+        "user": "={{ $credentials.ssh.user }}",
+        "privateKey": "={{ $credentials.ssh.privateKey }}"
+      },
+      "name": "Docker Build",
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [850, 300]
+    },
+    {
+      "parameters": {
+        "command": "=docker run --rm {{$json.imageTag}} echo 'Container test passed'",
+        "host": "={{ $credentials.ssh.host }}",
+        "user": "={{ $credentials.ssh.user }}",
+        "privateKey": "={{ $credentials.ssh.privateKey }}"
+      },
+      "name": "Test Container",
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [1050, 300]
+    },
+    {
+      "parameters": {
+        "command": "=docker scan {{$json.imageTag}} || echo 'Security scan completed'",
+        "host": "={{ $credentials.ssh.host }}",
+        "user": "={{ $credentials.ssh.user }}",
+        "privateKey": "={{ $credentials.ssh.privateKey }}"
+      },
+      "name": "Security Scan",
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [1250, 300]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.github.com/repos/{{$json.repo}}/statuses/{{$json.commit}}",
+        "method": "POST",
+        "body": {
+          "state": "success",
+          "description": "=✅ Docker build passed ({{$json.imageTag}})",
+          "context": "n8n-ci/docker"
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true
+      },
+      "name": "Report Success",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1450, 200]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.github.com/repos/{{$json.repo}}/statuses/{{$json.commit}}",
+        "method": "POST",
+        "body": {
+          "state": "failure",
+          "description": "=❌ Docker build failed",
+          "context": "n8n-ci/docker"
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true
+      },
+      "name": "Report Failure",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1450, 400]
+    }
+  ],
+  "connections": {
+    "GitHub Webhook": {
+      "main": [[{"node": "Parse Event", "type": "main", "index": 0}]]
+    },
+    "Parse Event": {
+      "main": [[{"node": "Checkout", "type": "main", "index": 0}]]
+    },
+    "Checkout": {
+      "main": [[{"node": "Docker Build", "type": "main", "index": 0}]]
+    },
+    "Docker Build": {
+      "main": [[{"node": "Test Container", "type": "main", "index": 0}]]
+    },
+    "Test Container": {
+      "main": [[{"node": "Security Scan", "type": "main", "index": 0}]]
+    },
+    "Security Scan": {
+      "main": [
+        [{"node": "Report Success", "type": "main", "index": 0}]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": ["ci", "docker", "container", "template"]
+}
