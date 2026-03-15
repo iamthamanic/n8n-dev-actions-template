@@ -1,0 +1,118 @@
+{
+  "_comment": "Dies ist die Hauptkonfiguration. Passe diese Werte an dein Projekt an.",
+  "project": {
+    "name": "beispiel-projekt",
+    "type": "node",
+    "repository": "iamthamanic/beispiel-projekt",
+    "description": "Kurze Beschreibung des Projekts"
+  },
+  "workflow": {
+    "template": "02-node-template.json",
+    "version": "1.0.0",
+    "stages": [
+      "install",
+      "lint", 
+      "test",
+      "build",
+      "quality-gate"
+    ],
+    "webhook": {
+      "url": "",
+      "method": "POST",
+      "path": ""
+    },
+    "triggers": {
+      "push": true,
+      "pull_request": true,
+      "branches": ["main", "develop"]
+    }
+  },
+  "runner": {
+    "host": "123.456.789.0",
+    "user": "root",
+    "ssh_key": "~/.ssh/id_ed25519",
+    "working_dir": "/opt/ci"
+  },
+  "build": {
+    "commands": {
+      "install": "npm ci",
+      "lint": "npm run lint",
+      "test": "npm run test",
+      "build": "npm run build"
+    },
+    "artifacts": [
+      "dist/",
+      "coverage/"
+    ],
+    "env": {
+      "NODE_ENV": "production",
+      "CI": "true"
+    }
+  },
+  "quality_gate": {
+    "enabled": true,
+    "tool": "shimwrappercheck",
+    "model": "kimi-k2.5",
+    "ollama_host": "http://localhost:11434",
+    "checks": ["security", "quality", "tests"],
+    "fail_on_error": true
+  },
+  "notifications": {
+    "telegram": {
+      "enabled": true,
+      "chat_id": "5220247822",
+      "on_success": false,
+      "on_failure": true
+    },
+    "github_status": {
+      "enabled": true,
+      "context": "n8n-ci"
+    }
+  },
+  "secrets": {
+    "github_token": {
+      "source": "env",
+      "key": "GITHUB_TOKEN"
+    },
+    "telegram_token": {
+      "source": "env", 
+      "key": "TELEGRAM_BOT_TOKEN"
+    },
+    "ssh_private_key": {
+      "source": "file",
+      "path": "~/.ssh/id_ed25519"
+    }
+  },
+  "deployment": {
+    "enabled": false,
+    "strategy": "ssh",
+    "target": {
+      "host": "123.456.789.0",
+      "user": "deploy",
+      "path": "/var/www/app"
+    },
+    "commands": [
+      "cd /var/www/app && git pull",
+      "cd /var/www/app && npm install --production",
+      "cd /var/www/app && pm2 restart app"
+    ],
+    "health_check": {
+      "url": "https://app.example.com/health",
+      "timeout": 30
+    }
+  },
+  "custom_stages": [
+    {
+      "name": "security-scan",
+      "command": "npm audit --audit-level=high",
+      "fail_on_error": true,
+      "description": "Prüft auf bekannte Sicherheitslücken"
+    }
+  ],
+  "_template_info": {
+    "version": "1.0.0",
+    "created": "2026-03-15",
+    "maintainer": "Raccoovaclaw",
+    "docs": "https://github.com/iamthamanic/n8n-dev-actions-template"
+  }
+}

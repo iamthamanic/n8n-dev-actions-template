@@ -1,0 +1,183 @@
+{
+  "name": "Node.js CI Template",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ci-node",
+        "responseMode": "lastNode"
+      },
+      "name": "GitHub Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "webhookId": "ci-node"
+    },
+    {
+      "parameters": {
+        "jsCode": "const event = $json;\nconst repo = event.repository?.full_name || 'unknown';\nconst ref = event.ref || 'unknown';\nconst commit = event.after || event.pull_request?.head?.sha;\nconst branch = ref.replace('refs/heads/', '');\n\nreturn {\n  json: {\n    repo,\n    ref,\n    commit,\n    branch,\n    event_type: $headers['x-github-event'],\n    workdir: `/tmp/ci/${repo.replace('/', '-')}`\n  }\n};"
+      },
+      "name": "Parse Event",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "command": "=mkdir -p {{$json.workdir}} && cd {{$json.workdir}} && (git clone https://{{$env.GITHUB_TOKEN}}@github.com/{{$json.repo}}.git . 2>/dev/null || git fetch && git checkout {{$json.branch}})",
+        "host": "={{ $credentials.ssh.host }}",
+        "user": "={{ $credentials.ssh.user }}",
+        "privateKey": "={{ $credentials.ssh.privateKey }}"
+      },
+      "name": "Checkout",
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "command": "=cd {{$json.workdir}} && npm ci",
+        "host": "={{ $credentials.ssh.host }}",
+        "user": "={{ $credentials.ssh.user }}",
+        "privateKey": "={{ $credentials.ssh.privateKey }}"
+      },
+      "name": "npm install",
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [850, 300]
+    },
+    {
+      "parameters": {
+        "command": "=cd {{$json.workdir}} && npm run lint",
+        "host": "={{ $credentials.ssh.host }}",
+        "user": "={{ $credentials.ssh.user }}",
+        "privateKey": "={{ $credentials.ssh.privateKey }}"
+      },
+      "name": "ESLint",
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [1050, 200]
+    },
+    {
+      "parameters": {
+        "command": "=cd {{$json.workdir}} && npm test",
+        "host": "={{ $credentials.ssh.host }}",
+        "user": "={{ $credentials.ssh.user }}",
+        "privateKey": "={{ $credentials.ssh.privateKey }}"
+      },
+      "name": "Jest Tests",
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [1050, 400]
+    },
+    {
+      "parameters": {
+        "command": "=cd {{$json.workdir}} && npm run build",
+        "host": "={{ $credentials.ssh.host }}",
+        "user": "={{ $credentials.ssh.user }}",
+        "privateKey": "={{ $credentials.ssh.privateKey }}"
+      },
+      "name": "Build",
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [1250, 300]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.github.com/repos/{{$json.repo}}/statuses/{{$json.commit}}",
+        "method": "POST",
+        "body": {
+          "state": "success",
+          "description": "✅ Node.js CI passed",
+          "context": "n8n-ci/node"
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true
+      },
+      "name": "Report Success",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1450, 250]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.github.com/repos/{{$json.repo}}/statuses/{{$json.commit}}",
+        "method": "POST",
+        "body": {
+          "state": "failure",
+          "description": "=❌ Node.js CI failed: {{$json.error}}",
+          "context": "n8n-ci/node"
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true
+      },
+      "name": "Report Failure",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1450, 450]
+    },
+    {
+      "parameters": {
+        "chatId": "5220247822",
+        "text": "=✅ CI Success: {{$json.repo}}\nBranch: {{$json.branch}}\nCommit: {{$json.commit}}",
+        "options": {}
+      },
+      "name": "Telegram Success",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [1650, 200]
+    },
+    {
+      "parameters": {
+        "chatId": "5220247822",
+        "text": "=❌ CI Failed: {{$json.repo}}\nBranch: {{$json.branch}}\nError: {{$json.error}}",
+        "options": {}
+      },
+      "name": "Telegram Failure",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [1650, 500]
+    }
+  ],
+  "connections": {
+    "GitHub Webhook": {
+      "main": [[{"node": "Parse Event", "type": "main", "index": 0}]]
+    },
+    "Parse Event": {
+      "main": [[{"node": "Checkout", "type": "main", "index": 0}]]
+    },
+    "Checkout": {
+      "main": [[{"node": "npm install", "type": "main", "index": 0}]]
+    },
+    "npm install": {
+      "main": [
+        [{"node": "ESLint", "type": "main", "index": 0}],
+        [{"node": "Jest Tests", "type": "main", "index": 0}]
+      ]
+    },
+    "ESLint": {
+      "main": [[{"node": "Build", "type": "main", "index": 0}]]
+    },
+    "Jest Tests": {
+      "main": [[{"node": "Build", "type": "main", "index": 0}]]
+    },
+    "Build": {
+      "main": [
+        [{"node": "Report Success", "type": "main", "index": 0}]
+      ]
+    },
+    "Report Success": {
+      "main": [[{"node": "Telegram Success", "type": "main", "index": 0}]]
+    },
+    "Report Failure": {
+      "main": [[{"node": "Telegram Failure", "type": "main", "index": 0}]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": ["ci", "node", "javascript", "template"]
+}

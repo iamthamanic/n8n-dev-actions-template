@@ -1,0 +1,122 @@
+{
+  "name": "Base CI Template",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ci-base",
+        "responseMode": "lastNode"
+      },
+      "name": "GitHub Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "webhookId": "ci-base"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse GitHub event\nconst event = $json;\nconst repo = event.repository?.full_name || 'unknown';\nconst ref = event.ref || 'unknown';\nconst commit = event.after || event.pull_request?.head?.sha;\n\nreturn {\n  json: {\n    repo,\n    ref,\n    commit,\n    branch: ref.replace('refs/heads/', ''),\n    event_type: $headers['x-github-event']\n  }\n};"
+      },
+      "name": "Parse Event",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "command": "mkdir -p /tmp/ci/{{$json.repo}} && cd /tmp/ci/{{$json.repo}} && git clone https://{{$env.GITHUB_TOKEN}}@github.com/{{$json.repo}}.git . || git pull",
+        "host": "={{ $json.runner_host }}",
+        "user": "={{ $json.runner_user }}",
+        "privateKey": "={{ $credentials.sshPrivateKey }}"
+      },
+      "name": "Checkout Code",
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "command": "cd /tmp/ci/{{$json.repo}} && echo 'Building...' && ls -la",
+        "host": "={{ $json.runner_host }}",
+        "user": "={{ $json.runner_user }}",
+        "privateKey": "={{ $credentials.sshPrivateKey }}"
+      },
+      "name": "Build",
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [850, 300]
+    },
+    {
+      "parameters": {
+        "command": "cd /tmp/ci/{{$json.repo}} && echo 'Testing...' && echo 'All tests passed!'",
+        "host": "={{ $json.runner_host }}",
+        "user": "={{ $json.runner_user }}",
+        "privateKey": "={{ $credentials.sshPrivateKey }}"
+      },
+      "name": "Test",
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [1050, 300]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.github.com/repos/{{$json.repo}}/statuses/{{$json.commit}}",
+        "method": "POST",
+        "body": {
+          "state": "success",
+          "description": "n8n CI passed",
+          "context": "n8n-ci/base"
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true
+      },
+      "name": "Report Success",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1250, 200]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.github.com/repos/{{$json.repo}}/statuses/{{$json.commit}}",
+        "method": "POST",
+        "body": {
+          "state": "failure",
+          "description": "=n8n CI failed: {{$json.error}}",
+          "context": "n8n-ci/base"
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true
+      },
+      "name": "Report Failure",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1250, 400]
+    }
+  ],
+  "connections": {
+    "GitHub Webhook": {
+      "main": [[{"node": "Parse Event", "type": "main", "index": 0}]]
+    },
+    "Parse Event": {
+      "main": [[{"node": "Checkout Code", "type": "main", "index": 0}]]
+    },
+    "Checkout Code": {
+      "main": [[{"node": "Build", "type": "main", "index": 0}]]
+    },
+    "Build": {
+      "main": [[{"node": "Test", "type": "main", "index": 0}]]
+    },
+    "Test": {
+      "main": [
+        [{"node": "Report Success", "type": "main", "index": 0}]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": ["ci", "base", "template"]
+}
